@@ -1,11 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import jwt, JWTError
+from passlib.context import CryptContext
+from datetime import datetime, timedelta
 
+ALGORITHM = "HS256"
+ACCESS_TOKEN_DURATION = 180
+SECRET= "0cd011703be118b57b91f8ae7da004826bc007a73a2519c31ee624f15b1306e8"
 
 router = APIRouter()
-
 oauth2 = OAuth2PasswordBearer(tokenUrl="login")
+
+crypt = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class User(BaseModel):
@@ -25,21 +32,21 @@ users_db = {
         "full_name": "John Doe",
         "email": "Hk0pG@example.com",
         "disabled": False,
-        "hashed_password": "fakehashedsecret",
+        "hashed_password": "$2a$12$vMUyniT.wTD1h0fELWhkge.Akr6Z7cZrNPuN2gpNBCscVglGXZFsC",
     },
     "janedoe": {
         "username": "janedoe",
         "full_name": "Jane Doe",
         "email": "UZQpK@example.com",
         "disabled": True,
-        "hashed_password": "fakehashedsecret2",
+        "hashed_password": "$2a$12$vMUyniT.wTD1h0fELWhkge.Akr6Z7cZrNPuN2gpNBCscVglGXZFsC",
     },
     "admin": {
         "username": "admin",
         "full_name": "Admin",
         "email": "Hk0pG@example.com",
         "disabled": False,
-        "hashed_password": "fakehashedsecret3",
+        "hashed_password": "$2a$12$vMUyniT.wTD1h0fELWhkge.Akr6Z7cZrNPuN2gpNBCscVglGXZFsC",
     },
 }
 
@@ -47,17 +54,31 @@ users_db = {
 def search_user_db(username: str):
     if username in users_db:
         return User_DB(**users_db[username])
-
+    
 def search_user(username: str):
+    print(username,"isername")
     if username in users_db:
         return User(**users_db[username])
+    
+async def auth_user(token:str = Depends(oauth2)):
 
-async def current_user(token: str = Depends(oauth2)):
-    user = search_user(token)
+    exeption = HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
+    try:
+        username=jwt.decode(token, SECRET, algorithms=[ALGORITHM]).get("sub")
+        if username is None:
+            raise exeption
+    except JWTError:
+        raise exeption
+    return search_user(username)
+
+async def current_user(user: User = Depends(auth_user)):
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
+            detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if user.disabled:
@@ -75,13 +96,18 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
             status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect username"
         )
     user = search_user_db(form.username)
-    if form.password != user.hashed_password:
+    if not crypt.verify(form.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password"
         )
-    return {"access_token": user.username, "token_type": "bearer"}
+    access_token = {
+        "sub": user.username,
+        "exp": datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_DURATION),
+    }
+    return {"access_token": jwt.encode(access_token, SECRET, algorithm=ALGORITHM), "token_type": "bearer"}
 
 
-@router.get("/users/me")
+
+@router.get("/me")
 async def me(user: User = Depends(current_user)):
     return user
