@@ -1,3 +1,7 @@
 from pymongo import MongoClient
+from dotenv import load_dotenv
+import os
 
-db_client = MongoClient( "mongodb://localhost:27017/" )
+load_dotenv()
+URI = os.environ.get("MONGO_URI")
+db_client = MongoClient( URI ).FastApi
